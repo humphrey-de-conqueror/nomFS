@@ -2,26 +2,37 @@
 #include <linux/fs.h>
 #include <linux/fs_context.h>
 #include <linux/init.h>
- 
-/*
- * Step 1: just prove the module loads and registers itself as a
- * filesystem type. Mounting will deliberately fail for now (-ENOSYS)
- * — we'll build the real superblock setup at Step 2.
- *
- * Modern kernels use the two-stage fs_context API
- * instead of the old single .mount callback:
- *   1. init_fs_context  — called when someone runs `mount -t nomfs ...`,
- *                          sets up a context and points it at get_tree.
- *   2. get_tree          — actually builds the superblock. For an
- *                          in-memory fs with no backing device, this
- *                          goes through get_tree_nodev(), which calls
- *                          our fill_super function.
- */
- 
+#include <linux/pagemap.h>
+
+#define NOMFS_MAGIC 0x6e6f6d66  /* "nomf" in hex, arbitrary unique magic */
+
+static const struct super_operations nomfs_super_ops = {
+    .statfs     = simple_statfs,
+};
+
 static int nomfs_fill_super(struct super_block *sb, struct fs_context *fc)
 {
-    /* Step 2 will build the real superblock/root inode here. */
-    return -ENOSYS;
+    struct inode *root_inode;
+
+    sb->s_magic     = NOMFS_MAGIC;
+    sb->s_op        = &nomfs_super_ops;
+    sb->s_blocksize = PAGE_SIZE;
+    sb->s_blocksize_bits = PAGE_SHIFT;
+
+    root_inode = new_inode(sb);
+    if (!root_inode)
+        return -ENOMEM;
+
+    root_inode->i_ino  = 1;
+    root_inode->i_mode = S_IFDIR | 0755;
+    simple_inode_init_ts(root_inode);
+    inc_nlink(root_inode);
+
+    sb->s_root = d_make_root(root_inode);
+    if (!sb->s_root)
+        return -ENOMEM;
+
+    return 0;
 }
  
 static int nomfs_get_tree(struct fs_context *fc)
