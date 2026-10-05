@@ -13,6 +13,18 @@ struct nomfs_inode_info {
   struct inode vfs_inode;
 };
 
+struct nomfs_nomnom {
+  atomic_t hunger; 
+  atomic_t mood; 
+  time64_t last_fed; 
+  time64_t last_ate; 
+  spinlock_t lock;
+};
+
+struct nomfs_sb_info {
+  struct nomfs_nomnom nomnom;
+};
+  
 static inline struct nomfs_inode_info *NOMFS_I(struct inode *inode)
 {
     return container_of(inode, struct nomfs_inode_info, vfs_inode);
@@ -148,12 +160,25 @@ static struct dentry *nomfs_mkdir(struct mnt_idmap *idmap, struct inode *dir,
 static int nomfs_fill_super(struct super_block *sb, struct fs_context *fc)
 {
     struct inode *root_inode;
+    struct nomfs_sb_info *sbi;
 
     sb->s_magic     = NOMFS_MAGIC;
     sb->s_op        = &nomfs_super_ops;
     sb->s_blocksize = PAGE_SIZE;
     sb->s_blocksize_bits = PAGE_SHIFT;
-
+    
+    sbi = kzalloc(sizeof(*sbi), GFP_KERNEL);
+    if (!sbi)
+      return -ENOMEM;
+      
+    atomic_set(&sbi->nomnom.hunger, 0);
+    atomic_set(&sbi->nomnom.mood, 50);
+    sbi->nomnom.last_fed = ktime_get_real_seconds();
+    sbi->nomnom.last_ate = ktime_get_real_seconds();
+    spin_lock_init(&sbi->nomnom.lock);
+    
+    sb->s_fs_info = sbi; 
+    
     root_inode = new_inode(sb);
     if (!root_inode)
         return -ENOMEM;
@@ -188,11 +213,17 @@ static int nomfs_init_fs_context(struct fs_context *fc)
     return 0;
 }
 
+static void nomfs_kill_sb(struct super_block *sb)
+{
+  kfree(sb->s_fs_info);
+  kill_anon_super(sb);
+}
+
 static struct file_system_type nomfs_type = {
     .owner           = THIS_MODULE,
     .name            = "nomfs",
     .init_fs_context = nomfs_init_fs_context,
-    .kill_sb         = kill_anon_super,
+    .kill_sb         = nomfs_kill_sb,
     .fs_flags        = FS_USERNS_MOUNT,
 };
 
