@@ -24,8 +24,13 @@ static const struct inode_operations nomfs_dir_inode_operations = {
     .mkdir  = nomfs_mkdir,
 };
 
+extern const struct address_space_operations ram_aops;
+
 static const struct file_operations nomfs_file_operations = {
     .open = simple_open,
+    .read_iter = generic_file_read_iter, 
+    .write_iter = generic_file_write_iter, 
+    .llseek = generic_file_llseek,
 };
 
 static struct inode *nomfs_get_inode(struct super_block *sb,
@@ -43,6 +48,7 @@ static struct inode *nomfs_get_inode(struct super_block *sb,
     switch (mode & S_IFMT) {
     case S_IFREG:
         inode->i_fop = &nomfs_file_operations;
+        inode->i_mapping->a_ops = &ram_aops;
         break;
     case S_IFDIR:
         inode->i_op  = &nomfs_dir_inode_operations;
