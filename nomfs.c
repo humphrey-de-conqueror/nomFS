@@ -68,8 +68,20 @@ static const struct inode_operations nomfs_dir_inode_operations = {
 
 extern const struct address_space_operations ram_aops;
 
+static int nomfs_open(struct inode *inode, struct file *file)
+{
+  struct nomfs_inode_info *ni = NOMFS_I(inode);
+  
+  ni->pets++;
+  ni->last_touched = ktime_get_real_seconds();
+  
+  pr_info("nomfs: inode %lu opened (pets=%u)\n", inode->i_ino, ni->pets);
+
+  return simple_open(inode, file);
+}
+
 static const struct file_operations nomfs_file_operations = {
-    .open = simple_open,
+    .open = nomfs_open,
     .read_iter = generic_file_read_iter, 
     .write_iter = generic_file_write_iter, 
     .llseek = generic_file_llseek,
