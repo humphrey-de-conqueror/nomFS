@@ -24,6 +24,8 @@ struct nomfs_nomnom {
 struct nomfs_sb_info {
   struct nomfs_nomnom nomnom;
 };
+
+static struct super_block *nomfs_active_sb;
   
 static inline struct nomfs_inode_info *NOMFS_I(struct inode *inode)
 {
@@ -178,6 +180,7 @@ static int nomfs_fill_super(struct super_block *sb, struct fs_context *fc)
     spin_lock_init(&sbi->nomnom.lock);
     
     sb->s_fs_info = sbi; 
+    nomfs_active_sb = sb;
     
     root_inode = new_inode(sb);
     if (!root_inode)
@@ -213,10 +216,37 @@ static int nomfs_init_fs_context(struct fs_context *fc)
     return 0;
 }
 
+
+
 static void nomfs_kill_sb(struct super_block *sb)
 {
+  nomfs_active_sb = NULL;
   kfree(sb->s_fs_info);
   kill_anon_super(sb);
+}
+
+static struct task_struct *nomfs_kthread;
+
+static int nomfs_hunger_thread(void *data)
+{
+  while (!kthread_should_stop()) {
+    if (nomfs_active_sb) {
+      struct nomfs_sb_info *sbi = nomfs_active_sb->s_fs_info; 
+      int hunger; 
+      
+      spin_lock(&sbi->nomnom.lock);
+      hunger = atomic_add_return(5, &sbi->nomnom.hunger);
+      if (hunger > 100)
+        atomic_set(&sbi->nomnom.hunger, 100);
+        
+      spin_unlock(&sbi->nomnom.lock);
+      pr_info("nomfs: tick, hunger = %d\n", hunger);
+    }
+    
+    schedule_timeout_interruptible(msecs_to_jiffies(5000));
+  }
+  
+  return 0;
 }
 
 static struct file_system_type nomfs_type = {
@@ -242,15 +272,27 @@ static int __init nomfs_init(void)
     
     ret = register_filesystem(&nomfs_type);
     if (ret == 0)
-        pr_info("nomfs: registered\n");
-    else
-        pr_err("nomfs: failed to register (%d)\n", ret);
-
-    return ret;
+      pr_info("nomfs: registered\n");
+    else {
+      pr_err("nomfs: failed to register (%d)\n", ret);
+      kmem_cache_destroy(nomfs_inode_cachep);
+      return ret;
+    }
+    
+    nomfs_kthread = kthread_run(nomfs_hunger_thread, NULL, "nomfs_creature");
+    if (IS_ERR(nomfs_kthread)) {
+      pr_err("nomfs: failed to start creature thread\n");
+      unregister_filesystem(&nomfs_type);
+      kmem_cache_destroy(nomfs_inode_cachep);
+      return PTR_ERR(nomfs_kthread);
+    }
+    
+    return 0;
 }
 
 static void __exit nomfs_exit(void)
 {
+    kthread_stop(nomfs_kthread);
     unregister_filesystem(&nomfs_type);
     kmem_cache_destroy(nomfs_inode_cachep);
     pr_info("nomfs: unregistered\n");
