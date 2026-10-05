@@ -3,8 +3,48 @@
 #include <linux/fs_context.h>
 #include <linux/init.h>
 #include <linux/pagemap.h>
+#include <linux/time64.h>
 
 #define NOMFS_MAGIC 0x6e6f6d66
+
+struct nomfs_inode_info {
+  unsigned int pets;
+  time64_t last_touched;
+  struct inode vfs_inode;
+};
+
+static inline struct nomfs_inode_info *NOMFS_I(struct inode *inode)
+{
+    return container_of(inode, struct nomfs_inode_info, vfs_inode);
+}
+
+static struct kmem_cache *nomfs_inode_cachep;
+
+static void nomfs_inode_init_once(void *foo)
+{
+  struct nomfs_inode_info *ni = foo; 
+  
+  inode_init_once(&ni->vfs_inode);
+};
+
+static struct inode *nomfs_alloc_inode(struct super_block *sb)
+{
+  struct nomfs_inode_info *ni = kmem_cache_alloc(nomfs_inode_cachep, GFP_KERNEL);
+  
+  if (!ni) 
+    return NULL; 
+    
+  ni->pets = 0;
+  ni->last_touched = ktime_get_real_seconds();
+  
+  return &ni->vfs_inode;
+}
+
+static void nomfs_free_inode(struct inode *inode)
+{
+  kmem_cache_free(nomfs_inode_cachep, NOMFS_I(inode));
+}
+
 
 /* forward declarations — needed so the tables below can reference
  * these functions before their full bodies appear later in the file */
@@ -16,6 +56,8 @@ static struct dentry *nomfs_mkdir(struct mnt_idmap *idmap, struct inode *dir,
 
 static const struct super_operations nomfs_super_ops = {
     .statfs = simple_statfs,
+    .alloc_inode = nomfs_alloc_inode, 
+    .free_inode = nomfs_free_inode,
 };
 
 static const struct inode_operations nomfs_dir_inode_operations = {
@@ -144,8 +186,18 @@ static struct file_system_type nomfs_type = {
 
 static int __init nomfs_init(void)
 {
-    int ret = register_filesystem(&nomfs_type);
-
+    int ret;
+    
+    nomfs_inode_cachep = kmem_cache_create("nomfs_inode_cache", 
+      sizeof(struct nomfs_inode_info), 
+      0, 
+      SLAB_RECLAIM_ACCOUNT, 
+      nomfs_inode_init_once);
+    
+    if (!nomfs_inode_cachep)
+      return -ENOMEM;
+    
+    ret = register_filesystem(&nomfs_type);
     if (ret == 0)
         pr_info("nomfs: registered\n");
     else
@@ -157,6 +209,7 @@ static int __init nomfs_init(void)
 static void __exit nomfs_exit(void)
 {
     unregister_filesystem(&nomfs_type);
+    kmem_cache_destroy(nomfs_inode_cachep);
     pr_info("nomfs: unregistered\n");
 }
 
