@@ -18,7 +18,7 @@ static struct inode *nomfs_find_victim(struct super_block *sb)
 			continue; 
 
 		/* todo: skip .feed file */
-		
+
 		ni = NOMFS_I(inode);
 
 		if (!victim || ni->last_touched < oldeest) {
@@ -45,6 +45,15 @@ int nomfs_hunger_thread(void *data)
             spin_unlock(&sbi->nomnom.lock);
 
             pr_info("nomfs: tick, hunger = %d\n", hunger);
+
+	    if (hunger >= 50) {
+		struct inode *victim = nomfs_find_victim(nomfs_active_sb);
+
+		if (victim)
+			pr_info("nomfs: would eat inode %lu (hunger = %d)\n", victim->i_ino, hunger);
+		else 
+			pr_info("nomfs: hungry but nothing to eat\n");
+	    }	
         }
 
         schedule_timeout_interruptible(msecs_to_jiffies(5000));
