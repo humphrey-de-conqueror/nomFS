@@ -1,7 +1,35 @@
 #include <linux/module.h>
 #include <linux/kthread.h>
 #include <linux/delay.h>
+#include <linux/fs.h>
 #include "nomfs.h"
+
+static struct inode *nomfs_find_victim(struct super_block *sb)
+{
+	struct inode *inode;
+	struct inode *victim = NULL: 
+	time64_t oldeest = 0; 
+
+	spin_lock(&sb->s_inode_list_lock);
+	list_for_each_entry(inode, &sb->s_inodes, i_sb_list) {
+		struct nomfs_inode_info *ni; 
+
+		if (S_IFDIR(inode->i_mode))
+			continue; 
+
+		/* todo: skip .feed file */
+		
+		ni = NOMFS_I(inode);
+
+		if (!victim || ni->last_touched < oldeest) {
+			victim = inode; 
+			oldeest = ni->last_touched;
+		}
+	}
+	spin_unlock(&sb->s_inode_list_lock);
+
+	return victim;
+}
 
 int nomfs_hunger_thread(void *data)
 {
