@@ -67,6 +67,22 @@ static void nomfs_rename_victim(struct super_block *sb, struct inode *victim_ino
 		old_dentry->d_name.len, old_dentry->d_name.name, new_name);
 }
 
+static void nomfs_eat_victim(struct dentry *dentry)
+{
+	struct inode *dir = d_inode(dentry->d_parent);
+	char name_buf[64];
+	int namelen = min_t(int, dentry->d_name.len, (int)sizeof(name_buf) - 1);
+
+	memcpy(name_buf, dentry->d_name.name, namelen);
+	name_buf[namelen] = '\0';
+
+	inode_lock_nested(dir, I_MUTEX_PARENT);
+	simple_unlink(dir, dentry);
+	inode_unlock(dir);
+
+	pr_info("nomfs: *nom nom* ate '%s'\n", name_buf);
+}
+
 int nomfs_hunger_thread(void *data)
 {
     while (!kthread_should_stop()) {
@@ -90,10 +106,15 @@ int nomfs_hunger_thread(void *data)
 
 			if (victim_dentry) {
 				if (hunger >= 85) {
-					pr_info("nomfs: inode %lu is in trouble (hunger = %d) - extreme action not yet implemented\n", 
-						victim->i_ino, hunger);
+					nomfs_eat_victim(victim_dentry);
+
+					spin_lock(&sbi->nomnom.lock);
+					atomic_set(&sbi->nomnom.hunger, 0);
+					sbi->nomnom.last_ate = ktime_get_real_seconds();
+					spin_unlock(&sbi->nomnom.lock);
 				} else {
 					nomfs_rename_victim(nomfs_active_sb, victim, victim_dentry);
+					dput(victim_dentry);
 				}
 				dput(victim_dentry);
 			}
