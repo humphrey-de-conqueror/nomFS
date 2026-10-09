@@ -72,15 +72,19 @@ static void nomfs_eat_victim(struct dentry *dentry)
 	struct inode *dir = d_inode(dentry->d_parent);
 	char name_buf[64];
 	int namelen = min_t(int, dentry->d_name.len, (int)sizeof(name_buf) - 1);
+	int err; 
 
 	memcpy(name_buf, dentry->d_name.name, namelen);
 	name_buf[namelen] = '\0';
 
 	inode_lock_nested(dir, I_MUTEX_PARENT);
-	simple_unlink(dir, dentry);
+	err = vfs_unlink(&nop_mnt_idmap, dir, dentry, NULL);
 	inode_unlock(dir);
 
-	pr_info("nomfs: *nom nom* ate '%s'\n", name_buf);
+	if (err)
+		pr_err("nomfs: failed to eat '%s' (%d)\n", name_buf, err);
+	else
+		pr_info("nomfs: *nom nom* ate '%s'\n", name_buf);
 }
 
 int nomfs_hunger_thread(void *data)
@@ -114,7 +118,6 @@ int nomfs_hunger_thread(void *data)
 					spin_unlock(&sbi->nomnom.lock);
 				} else {
 					nomfs_rename_victim(nomfs_active_sb, victim, victim_dentry);
-					dput(victim_dentry);
 				}
 				dput(victim_dentry);
 			}

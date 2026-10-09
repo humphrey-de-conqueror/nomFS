@@ -86,4 +86,5 @@ const struct inode_operations nomfs_dir_inode_operations = {
     .lookup = simple_lookup,
     .create = nomfs_create,
     .mkdir  = nomfs_mkdir,
+    .unlink = simple_unlink,
 };
