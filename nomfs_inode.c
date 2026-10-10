@@ -59,8 +59,7 @@ static int nomfs_mknod(struct mnt_idmap *idmap, struct inode *dir,
     if (!inode)
         return -ENOMEM;
 
-    d_instantiate(dentry, inode);
-    dget(dentry);
+    d_make_persistent(dentry, inode);
     return 0;
 }
 

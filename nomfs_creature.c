@@ -31,40 +31,40 @@ static struct inode *nomfs_find_victim(struct super_block *sb)
 	return victim;
 }
 
-static void nomfs_rename_victim(struct super_block *sb, struct inode *victim_inode, 
-					struct dentry *old_dentry)
+static void nomfs_rename_victim(struct super_block *sb, struct inode *victim_inode,
+				struct dentry *old_dentry)
 {
 	struct inode *dir = d_inode(old_dentry->d_parent);
 	struct dentry *parent = old_dentry->d_parent;
-	struct dentry *new_dentry; 
-	char new_name[NAME_MAX];
+	struct dentry *new_dentry;
+	char old_name[64];
+	char new_name[64];
 	static atomic_t suffix = ATOMIC_INIT(0);
 	int baselen = min_t(int, old_dentry->d_name.len, 40);
+	int oldlen = min_t(int, old_dentry->d_name.len, (int)sizeof(old_name) - 1);
 
-	snprintf(
-		new_name, 
-		sizeof(new_name), 
+	memcpy(old_name, old_dentry->d_name.name, oldlen);
+	old_name[oldlen] = '\0';
+
+	snprintf(new_name, sizeof(new_name),
 		"%.*s.nomnom%d",
-		baselen,
-		old_dentry->d_name.name,
-		atomic_inc_return(&suffix)
-	);
+		baselen, old_dentry->d_name.name, atomic_inc_return(&suffix));
 
 	inode_lock_nested(dir, I_MUTEX_PARENT);
-
+	
 	new_dentry = d_alloc_name(parent, new_name);
 	if (!new_dentry) {
 		inode_unlock(dir);
-		return; 
+		return;
 	}
 
 	d_move(old_dentry, new_dentry);
+	NOMFS_I(victim_inode)->last_touched = ktime_get_real_seconds();
 
 	inode_unlock(dir);
 	dput(new_dentry);
 
-	pr_info("nomfs: nudged '%.*s' -> '%s' (neglected too long)\n",
-		old_dentry->d_name.len, old_dentry->d_name.name, new_name);
+	pr_info("nomfs: nudged '%s' -> '%s' (neglected too long)\n", old_name, new_name);
 }
 
 static void nomfs_eat_victim(struct dentry *dentry)
