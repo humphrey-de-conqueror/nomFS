@@ -534,3 +534,13 @@ static void __exit myfs_exit(void) { unregister_filesystem(&myfs_type); }
 - `i_nlink` counts names on disk, `i_count` counts memory users, `d_lockref` counts dentry users, `f_count` counts fd/file users.
 - `->lookup` fills the dcache, `->open` fills `private_data`, `->evict_inode` frees disk resources.
 - When in doubt: grep for how `ramfs` (./fs/ramfs/) or `minix` (./fs/minix/) does it; they are the smallest readable examples.
+
+---
+
+## 12. Print to buffer
+```
+scnprintf(): accepts ordinary variadic arguments
+
+vscnprintf(): accept a va_list containing those arguments
+
+```

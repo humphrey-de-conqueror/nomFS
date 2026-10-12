@@ -4,6 +4,43 @@
 #include <linux/fs.h>
 #include "nomfs.h"
 
+#define NOMFS_FEED_SIZE	4096
+
+static char nomfs_feed_buf[NOMFS_FEED_SIZE];
+static size_t nomfs_feed_len;
+static DEFINE_SPINLOCK(nomfs_feed_lock);
+
+static void nomfs_feed_append(const char *fmt, ...)
+{
+	va_list args;
+	char line[256];
+	int n;
+	size_t linelen;
+
+	va_start(args, fmt);
+	n = vscnprintf(line, sizeof(line), fmt, args);
+	va_end(args);
+
+	if (n <= 0)
+		return;
+
+	if (line[n - 1] != '\n' && (size_t)n < sizeof(line) - 1)
+		line[n++] = '\n';
+
+	linelen = n;
+
+	spin_lock(&nomfs_feed_lock);
+
+	if (nomfs_feed_len + linelen > NOMFS_FEED_SIZE) {
+		nomfs_feed_len = 0;
+	}
+
+	memcpy(nomfs_feed_buf + nomfs_feed_len, line, linelen);
+	nomfs_feed_len += linelen;
+
+	spin_unlock(&nomfs_feed_lock);
+}
+
 static struct inode *nomfs_find_victim(struct super_block *sb)
 {
 	struct inode *inode;
@@ -64,7 +101,7 @@ static void nomfs_rename_victim(struct super_block *sb, struct inode *victim_ino
 	inode_unlock(dir);
 	dput(new_dentry);
 
-	pr_info("nomfs: nudged '%s' -> '%s' (neglected too long)\n", old_name, new_name);
+	nomfs_feed_append("mm, '%s' looked neglected, nudged it to '%s'~", old_name, new_name);
 }
 
 static void nomfs_eat_victim(struct dentry *dentry)
@@ -84,7 +121,7 @@ static void nomfs_eat_victim(struct dentry *dentry)
 	if (err)
 		pr_err("nomfs: failed to eat '%s' (%d)\n", name_buf, err);
 	else
-		pr_info("nomfs: *nom nom* ate '%s'\n", name_buf);
+		nomfs_feed_append("*nom nom* ate '%s'. so hungry...", name_buf);
 }
 
 int nomfs_hunger_thread(void *data)
@@ -100,7 +137,7 @@ int nomfs_hunger_thread(void *data)
                 atomic_set(&sbi->nomnom.hunger, 100);
             spin_unlock(&sbi->nomnom.lock);
 
-            pr_info("nomfs: tick, hunger = %d\n", hunger);
+            nomfs_feed_append("the hunger grows... (%d%%)", hunger);
 
 	    if (hunger >= 50) {
 		struct inode *victim = nomfs_find_victim(nomfs_active_sb);
