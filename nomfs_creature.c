@@ -41,6 +41,24 @@ static void nomfs_feed_append(const char *fmt, ...)
 	spin_unlock(&nomfs_feed_lock);
 }
 
+static ssize_t nomfs_feed_read(struct file *file, char __user *buf,
+				size_t count, loff_t *ppos)
+{
+	char snapshot[NOMFS_FEED_SIZE];
+	size_t len;
+
+	spin_lock(&nomfs_feed_lock);
+	len = nomfs_feed_len;
+	memcpy(snapshot, nomfs_feed_buf, len);
+	spin_unlock(&nomfs_feed_lock);
+
+	return simple_read_from_buffer(buf, count, ppos, snapshot, len);
+}
+
+const struct file_operations nomfs_feed_fops = {
+	.read = nomfs_feed_read,
+};
+
 static struct inode *nomfs_find_victim(struct super_block *sb)
 {
 	struct inode *inode;
@@ -54,7 +72,8 @@ static struct inode *nomfs_find_victim(struct super_block *sb)
 		if (S_ISDIR(inode->i_mode))
 			continue; 
 
-		/* todo: skip .feed file */
+		if (inode == nomfs_feed_inode)
+			continue;
 
 		ni = NOMFS_I(inode);
 
