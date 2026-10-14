@@ -6,6 +6,7 @@
 struct super_block *nomfs_active_sb;
 struct kmem_cache *nomfs_inode_cachep;
 struct inode *nomfs_feed_inode;
+struct dentry *nomfs_hoard_dentry;
 
 void nomfs_inode_init_once(void *foo)
 {
@@ -44,6 +45,8 @@ int nomfs_fill_super(struct super_block *sb, struct fs_context *fc)
 	struct nomfs_sb_info *sbi;
 	struct inode *feed_inode;
 	struct dentry *feed_dentry;
+	struct inode *hoard_inode;
+	struct dentry *hoard_dentry;
 
 	sb->s_magic     = NOMFS_MAGIC;
 	sb->s_op        = &nomfs_super_ops;
@@ -97,6 +100,30 @@ int nomfs_fill_super(struct super_block *sb, struct fs_context *fc)
 
 	d_make_persistent(feed_dentry, feed_inode);
 	nomfs_feed_inode = feed_inode;
+
+	
+	hoard_inode = new_inode(sb);
+	if (!hoard_inode)
+		return -ENOMEM;
+
+	hoard_inode->i_ino = get_next_ino();
+	hoard_inode->i_mode = S_IFDIR | 0755;
+	simple_inode_init_ts(hoard_inode);
+	hoard_inode->i_op = &nomfs_dir_inode_operations;
+	hoard_inode->i_fop = &simple_dir_operations;
+	inc_nlink(hoard_inode);
+
+	hoard_dentry = d_alloc_name(sb->s_root, ".hoard");
+	if (!hoard_dentry) {
+		iput(hoard_inode);
+		return -ENOMEM;
+	}
+
+	d_make_persistent(hoard_dentry, hoard_inode);
+	inc_nlink(root_inode);
+
+	nomfs_hoard_dentry = hoard_dentry;
+	
 	return 0;
 }
 

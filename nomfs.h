@@ -39,6 +39,7 @@ extern struct super_block *nomfs_active_sb;
 extern struct kmem_cache *nomfs_inode_cachep;
 extern const struct file_operations nomfs_feed_fops;
 extern struct inode *nomfs_feed_inode;
+extern struct dentry *nomfs_hoard_dentry;
 
 /* ---- operations tables that get referenced across files ---- */
 extern const struct inode_operations nomfs_dir_inode_operations;

@@ -2,6 +2,7 @@
 #include <linux/kthread.h>
 #include <linux/delay.h>
 #include <linux/fs.h>
+#include <linux/namei.h>
 #include "nomfs.h"
 
 #define NOMFS_FEED_SIZE	4096
@@ -123,6 +124,43 @@ static void nomfs_rename_victim(struct super_block *sb, struct inode *victim_ino
 	nomfs_feed_append("mm, '%s' looked neglected, nudged it to '%s'~", old_name, new_name);
 }
 
+static void nomfs_move_victim(struct inode *victim_inode, struct dentry *old_dentry)
+{
+	struct dentry *old_parent = old_dentry->d_parent;
+	struct dentry *new_parent = nomfs_hoard_dentry;
+	struct dentry *new_dentry;
+	struct dentry *trap;
+	char name[64];
+	int namelen = min_t(int, old_dentry->d_name.len, (int)sizeof(name) - 1);
+
+	if (old_parent == new_parent)
+		return;
+
+	memcpy(name, old_dentry->d_name.name, namelen);
+	name[namelen] = '\0';
+
+	trap = lock_rename(old_parent, new_parent);
+	if (IS_ERR(trap)) {
+		pr_err("nomfs: cound not lock directories to drag off '%s' \n", name);
+		return;
+	}
+
+	new_dentry = d_alloc_name(new_parent, name);
+	if (!new_dentry) {
+		unlock_rename(old_parent, new_parent);
+		return;
+	}
+
+	d_move(old_dentry, new_dentry);
+	NOMFS_I(victim_inode)->last_touched = ktime_get_real_seconds();
+
+	unlock_rename(old_parent, new_parent);
+	dput(new_dentry);
+	
+	pr_info("nomfs: dragged '%s' off to the hoard\n", name);
+	nomfs_feed_append("found '%s'... mine now. dragging it to the hoard", name);
+}
+
 static void nomfs_eat_victim(struct dentry *dentry)
 {
 	struct inode *dir = d_inode(dentry->d_parent);
@@ -172,6 +210,8 @@ int nomfs_hunger_thread(void *data)
 					atomic_set(&sbi->nomnom.hunger, 0);
 					sbi->nomnom.last_ate = ktime_get_real_seconds();
 					spin_unlock(&sbi->nomnom.lock);
+				} else if (hunger >= 65) {
+					nomfs_move_victim(victim, victim_dentry);
 				} else {
 					nomfs_rename_victim(nomfs_active_sb, victim, victim_dentry);
 				}
