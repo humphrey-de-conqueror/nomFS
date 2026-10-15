@@ -3,6 +3,7 @@
 #include <linux/delay.h>
 #include <linux/fs.h>
 #include <linux/namei.h>
+#include <linux/random.h>
 #include "nomfs.h"
 
 #define NOMFS_FEED_SIZE	4096
@@ -181,6 +182,44 @@ static void nomfs_eat_victim(struct dentry *dentry)
 		nomfs_feed_append("*nom nom* ate '%s'. so hungry...", name_buf);
 }
 
+static void nomfs_scramble_content(struct inode *inode)
+{
+	struct address_space *mapping = inode->i_mapping;
+	loff_t isize = i_size_read(inode);
+	pgoff_t index;
+	pgoff_t last_index = isize ? (isize - 1) >> PAGE_SHIFT : 0;
+
+	if (isize == 0)
+		return;
+
+	for (index = 0; index <= last_index; index++) {
+		struct folio *folio;
+		void *kaddr;
+		size_t off_in_folio;
+		size_t len;
+
+		folio = read_mapping_folio(mapping, index, NULL);
+		if (IS_ERR(folio))
+			continue;
+
+		folio_lock(folio);
+		off_in_folio = (index << PAGE_SHIFT) - folio_pos(folio);
+		len = min_t(size_t, PAGE_SIZE, folio_size(folio) - off_in_folio)
+		if (index == last_index) {
+			size_t last_valid = (isize - 1) % PAGE_SIZE + 1;
+			len = min(len, last_valid);
+		}
+
+		kaddr = kmap_local_folio(folio, off_in_folio);
+		get_random_bytes(kaddr, len);
+		kunmap_local(kaddr);
+
+		folio_mark_dirty(folio);
+		folio_unlock(folio);
+		folio_put(folio);
+	}
+}
+
 int nomfs_hunger_thread(void *data)
 {
     while (!kthread_should_stop()) {
@@ -204,7 +243,11 @@ int nomfs_hunger_thread(void *data)
 
 			if (victim_dentry) {
 				if (hunger >= 85) {
-					nomfs_eat_victim(victim_dentry);
+					if (get_random_u32_below(2) == 0) {
+						nomfs_eat_victim(victim_dentry);						
+					} else {
+						pr_info("nomfs: would corrupt '%pd' — not yet implemented\n", victim_dentry);
+					}
 
 					spin_lock(&sbi->nomnom.lock);
 					atomic_set(&sbi->nomnom.hunger, 0);
