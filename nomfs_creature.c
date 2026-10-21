@@ -5,6 +5,8 @@
 #include <linux/namei.h>
 #include <linux/random.h>
 #include "nomfs.h"
+#include <linux/highmem.h>
+#include <linux/pagemap.h>
 
 #define NOMFS_FEED_SIZE	4096
 
@@ -142,7 +144,7 @@ static void nomfs_move_victim(struct inode *victim_inode, struct dentry *old_den
 
 	trap = lock_rename(old_parent, new_parent);
 	if (IS_ERR(trap)) {
-		pr_err("nomfs: cound not lock directories to drag off '%s' \n", name);
+		pr_err("nomfs: could not lock directories to drag off '%s' \n", name);
 		return;
 	}
 
@@ -184,40 +186,40 @@ static void nomfs_eat_victim(struct dentry *dentry)
 
 static void nomfs_scramble_content(struct inode *inode)
 {
-	struct address_space *mapping = inode->i_mapping;
-	loff_t isize = i_size_read(inode);
-	pgoff_t index;
-	pgoff_t last_index = isize ? (isize - 1) >> PAGE_SHIFT : 0;
+    struct address_space *mapping = inode->i_mapping;
+    loff_t isize = i_size_read(inode);
+    pgoff_t index;
+    pgoff_t last_index = isize ? (isize - 1) >> PAGE_SHIFT : 0;
 
-	if (isize == 0)
-		return;
+    if (isize == 0)
+        return;
 
-	for (index = 0; index <= last_index; index++) {
-		struct folio *folio;
-		void *kaddr;
-		size_t off_in_folio;
-		size_t len;
+    for (index = 0; index <= last_index; index++) {
+        struct folio *folio;
+        void *kaddr;
+        size_t off_in_folio, len;
 
-		folio = read_mapping_folio(mapping, index, NULL);
-		if (IS_ERR(folio))
-			continue;
+        folio = read_mapping_folio(mapping, index, NULL);
+        if (IS_ERR(folio))
+            continue;
 
-		folio_lock(folio);
-		off_in_folio = (index << PAGE_SHIFT) - folio_pos(folio);
-		len = min_t(size_t, PAGE_SIZE, folio_size(folio) - off_in_folio)
-		if (index == last_index) {
-			size_t last_valid = (isize - 1) % PAGE_SIZE + 1;
-			len = min(len, last_valid);
-		}
+        folio_lock(folio);
 
-		kaddr = kmap_local_folio(folio, off_in_folio);
-		get_random_bytes(kaddr, len);
-		kunmap_local(kaddr);
+        off_in_folio = (index << PAGE_SHIFT) - folio_pos(folio);
+        len = min_t(size_t, PAGE_SIZE, folio_size(folio) - off_in_folio);
+        if (index == last_index) {
+            size_t last_valid = (isize - 1) % PAGE_SIZE + 1;
+            len = min(len, last_valid);
+        }
 
-		folio_mark_dirty(folio);
-		folio_unlock(folio);
-		folio_put(folio);
-	}
+        kaddr = kmap_local_folio(folio, off_in_folio);
+        get_random_bytes(kaddr, len);
+        kunmap_local(kaddr);
+
+        folio_mark_dirty(folio);
+        folio_unlock(folio);
+        folio_put(folio);
+    }
 }
 
 int nomfs_hunger_thread(void *data)
@@ -246,7 +248,17 @@ int nomfs_hunger_thread(void *data)
 					if (get_random_u32_below(2) == 0) {
 						nomfs_eat_victim(victim_dentry);						
 					} else {
-						pr_info("nomfs: would corrupt '%pd' — not yet implemented\n", victim_dentry);
+						struct inode *victim_inode = d_inode(victim_dentry);
+						char name[64];
+						int namelen = min_t(int, victim_dentry->d_name.len, (int)sizeof(name) - 1);
+
+						memcpy(name, victim_dentry->d_name.name, namelen);
+						name[namelen] = '\0';
+
+						nomfs_scramble_content(victim_inode);
+
+						pr_info("nomfs: scrambled '%s' into garbage\n", name);
+						nomfs_feed_append("*rummages through '%s'*... hehe, now it's nonsense", name);
 					}
 
 					spin_lock(&sbi->nomnom.lock);
